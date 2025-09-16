@@ -178,6 +178,17 @@ kcm use -- npm start
 - Bash 4.0 or higher
 - Access to macOS Keychain
 
+## Important Notes
+
+### macOS Security Prompts
+
+When using kcm for the first time or accessing certain secrets, **macOS will display a security dialog** asking for your password or Touch ID. This is normal behavior - macOS is protecting your Keychain and requires your authorization to allow kcm to access stored secrets.
+
+You may see prompts like:
+
+- "kcm wants to use your confidential information stored in [KEY_NAME] in your keychain"
+- You can click "Always Allow" to avoid repeated prompts for the same secret
+
 ## Troubleshooting
 
 ### Permission Issues
@@ -207,6 +218,43 @@ kcm remove KEY_NAME
 # Or remove directly via security command
 security delete-generic-password -s "KEY_NAME"
 ```
+
+## Development
+
+### Release Process
+
+To create a new release:
+
+1. **Test with dry-run first:**
+
+   ```bash
+   ./release.sh --dry-run 0.2.0
+   ```
+
+   This shows what will happen without making any changes.
+
+2. **Create the actual release:**
+
+   ```bash
+   ./release.sh 0.2.0
+   ```
+
+   This will:
+
+   - Update version in the kcm script
+   - Generate Formula/kcm.rb from template
+   - Commit and create a git tag
+   - Push to GitHub
+   - Calculate SHA256 for the release tarball
+   - Update the formula with the correct SHA256
+   - Push the final formula
+
+3. **Users can then upgrade:**
+   ```bash
+   brew upgrade kcm
+   ```
+
+The release script handles all versioning, tagging, and formula updates automatically.
 
 ## Contributing
 
