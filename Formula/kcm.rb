@@ -2,7 +2,7 @@ class Kcm < Formula
   desc "Keychain Master - Secure secret management for macOS"
   homepage "https://github.com/tyom/kcm"
   url "https://github.com/tyom/kcm/archive/refs/tags/v0.1.1.tar.gz"
-  sha256 "PLACEHOLDER"
+  sha256 "a3f690c0409c88d2ff5f0faea60adaa8c2aeb641bcedfee5f91c4a13064092ad"
   license "MIT"
 
   depends_on :macos
