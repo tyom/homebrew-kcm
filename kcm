@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # km: Keychain Master - Secret management utility for macOS Keychain
-# Version: 0.1.0
+# Version: 0.1.1
 #
 # Usage:
 #   km add KEY_NAME [value]     - Add secret to Keychain
@@ -23,7 +23,7 @@
 
 set -e
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
