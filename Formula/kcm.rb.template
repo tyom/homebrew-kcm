@@ -1,0 +1,41 @@
+class Kcm < Formula
+  desc "Keychain Master - Secure secret management for macOS"
+  homepage "https://github.com/tyom/kcm"
+  url "https://github.com/tyom/kcm/archive/refs/tags/v{{VERSION}}.tar.gz"
+  sha256 "{{SHA256}}"
+  license "MIT"
+
+  depends_on :macos
+
+  def install
+    bin.install "kcm"
+    chmod 0755, bin/"kcm"
+  end
+
+  test do
+    # Test help command
+    assert_match "Keychain Master", shell_output("#{bin}/kcm help")
+
+    # Test that the script exists and is executable
+    assert_predicate bin/"kcm", :exist?
+    assert_predicate bin/"kcm", :executable?
+  end
+
+  def caveats
+    <<~EOS
+      kcm has been installed! Here's how to get started:
+
+      1. Add a secret to your Keychain:
+         kcm add DATABASE_URL "your-connection-string"
+
+      2. Add the reference to your .env file:
+         DATABASE_URL="keychain://DATABASE_URL"
+
+      3. Run your application with resolved secrets:
+         kcm use -- npm run dev
+
+      For more information:
+         kcm help
+    EOS
+  end
+end
