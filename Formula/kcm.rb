@@ -1,15 +1,20 @@
 class Kcm < Formula
   desc "Keychain Master - Secure secret management for macOS"
   homepage "https://github.com/tyom/kcm"
-  url "https://github.com/tyom/kcm/archive/refs/tags/v0.1.1.tar.gz"
-  sha256 "a3f690c0409c88d2ff5f0faea60adaa8c2aeb641bcedfee5f91c4a13064092ad"
+  url "https://github.com/tyom/kcm/archive/refs/tags/v0.2.0.tar.gz"
+  sha256 "PLACEHOLDER"
   license "MIT"
 
   depends_on :macos
+  depends_on "bash"
 
   def install
+    # Install the script
     bin.install "kcm"
     chmod 0755, bin/"kcm"
+
+    # Update shebang to use brew's bash
+    inreplace bin/"kcm", "#!/usr/bin/env bash", "#!#{Formula["bash"].opt_bin}/bash"
   end
 
   test do
@@ -19,6 +24,13 @@ class Kcm < Formula
     # Test that the script exists and is executable
     assert_predicate bin/"kcm", :exist?
     assert_predicate bin/"kcm", :executable?
+
+    # Test version command
+    assert_match(/kcm version \d+\.\d+\.\d+/, shell_output("#{bin}/kcm version"))
+
+    # Test that the script can run without errors
+    # Avoid keychain operations that might trigger GUI prompts in CI
+    system "#{bin}/kcm", "help"
   end
 
   def caveats
