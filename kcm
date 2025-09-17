@@ -131,10 +131,14 @@ COMMANDS:
       kcm copy API_KEY
 
   ls [pattern]
-    List secrets in Keychain matching pattern (supports wildcards)
+    List accessible secrets in Keychain matching pattern (supports wildcards)
+
+    Note: Only shows secrets that kcm can access. Some application-specific
+    secrets may exist in your keychain but have special access controls
+    that prevent kcm from reading them.
 
     Examples:
-      kcm ls               # List all secrets
+      kcm ls               # List all accessible secrets
       kcm ls DATABASE*     # List secrets starting with DATABASE
       kcm ls *_KEY         # List secrets ending with _KEY
 
@@ -504,6 +508,10 @@ copy_secret() {
 }
 
 # Function to list secrets matching pattern
+# NOTE: This function lists only secrets that kcm can actually access.
+# Some keychain entries may be visible in the system keychain dump but have
+# access restrictions that prevent them from being read by the security command.
+# We test each entry for accessibility before showing it to the user.
 list_secrets() {
   if ! command -v security >/dev/null 2>&1; then
     error_exit "This command requires macOS with the 'security' command"
@@ -521,7 +529,7 @@ list_secrets() {
     grep_pattern="^${grep_pattern}$"
   fi
 
-  echo -e "${BLUE}Secrets in Keychain matching '$pattern':${NC}"
+  echo -e "${BLUE}Accessible secrets in Keychain matching '$pattern':${NC}"
   echo ""
 
   # List secrets using security find-generic-password
@@ -538,19 +546,52 @@ list_secrets() {
   keychains=$(security list-keychains | tr -d '"' | grep -v "^$")
 
   # Search through all available keychains
+  # List all generic password entries (these are what kcm can access)
   while IFS= read -r keychain; do
     [ -n "$keychain" ] || continue
+    # Trim any leading/trailing whitespace from keychain path
+    keychain=$(echo "$keychain" | xargs)
 
-    # Use security dump-keychain with each keychain
+    # Use security dump-keychain to find all generic password entries
+    # Filter for class: "genp" which are the generic passwords kcm can work with
     security dump-keychain "$keychain" 2>/dev/null | \
-      grep -E '0x00000007.*<blob>=' | \
-      sed 's/.*<blob>="\(.*\)"/\1/' | \
+      awk '/^keychain:/ {keychain=1}
+           /class: "genp"/ {if(keychain) genp=1; else genp=0}
+           /0x00000007.*<blob>="[^"]+"/ {
+             if(genp) {
+               gsub(/.*<blob>="/, "");
+               gsub(/".*/, "");
+               service=$0
+             }
+           }
+           /"acct"<blob>=/ {
+             if(genp && service) {
+               print service
+               service=""
+             }
+           }
+           /^keychain:/ {genp=0; service=""}' | \
       grep -E "$grep_pattern" >> "$temp_list" || true
   done <<< "$keychains"
 
-  # Sort and deduplicate results
+  # Sort and deduplicate results, then filter for actually accessible ones
   if [ -s "$temp_list" ]; then
-    secrets=$(sort -u "$temp_list")
+    # Test each potential secret to see if it's actually accessible
+    local accessible_list
+    accessible_list=$(mktemp -t kcm.XXXXXX)
+    TEMP_FILES+=("$accessible_list")
+
+    sort -u "$temp_list" | while IFS= read -r secret; do
+      # Try to access the secret - if successful, add to accessible list
+      if security find-generic-password -s "$secret" >/dev/null 2>&1; then
+        echo "$secret" >> "$accessible_list"
+      fi
+    done
+
+    if [ -s "$accessible_list" ]; then
+      secrets=$(cat "$accessible_list")
+    fi
+    rm -f "$accessible_list"
   fi
   rm -f "$temp_list"
 
