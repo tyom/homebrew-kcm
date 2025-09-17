@@ -1,7 +1,7 @@
 #!/bin/bash
 # Script to create a new release and update the formula
 
-set -e
+set -euo pipefail
 
 # Parse arguments
 DRY_RUN=false
@@ -35,13 +35,22 @@ fi
 echo "Creating release v${VERSION}..."
 echo ""
 
+# Detect sed type for portability (BSD vs GNU)
+if sed --version >/dev/null 2>&1; then
+    # GNU sed
+    SED_INPLACE="sed -i"
+else
+    # BSD sed (macOS)
+    SED_INPLACE="sed -i ''"
+fi
+
 # Update version in kcm script
 echo "Updating version in kcm script..."
 if [ "$DRY_RUN" = true ]; then
     echo "  Would update VERSION and header comment to ${VERSION}"
 else
-    sed -i '' "s/^VERSION=\".*\"/VERSION=\"${VERSION}\"/" kcm
-    sed -i '' "s/^# Version: .*/# Version: ${VERSION}/" kcm
+    $SED_INPLACE "s/^VERSION=\".*\"/VERSION=\"${VERSION}\"/" kcm
+    $SED_INPLACE "s/^# Version: .*/# Version: ${VERSION}/" kcm
 fi
 
 # Generate formula from template with version (SHA256 will be updated later)
@@ -60,6 +69,12 @@ if [ "$DRY_RUN" = true ]; then
     echo "  Message: Release v${VERSION}"
 else
     git add kcm Formula/kcm.rb
+    # Check if there are actual changes to commit
+    if git diff --cached --quiet; then
+        echo "  No changes to commit - files already at version ${VERSION}"
+        echo "  Skipping tag creation and push"
+        exit 0
+    fi
     git commit -m "Release v${VERSION}"
 fi
 
@@ -98,7 +113,7 @@ fi
 echo "  SHA256: $SHA256"
 
 # Generate final formula from template with correct SHA256
-echo "Updating Formula/kcm.rb with SHA256…"
+echo "Updating Formula/kcm.rb with SHA256..."
 if [ "$DRY_RUN" = true ]; then
     echo "  Would update Formula/kcm.rb with SHA256: $SHA256"
     sed -e "s/{{VERSION}}/${VERSION}/g" -e "s/{{SHA256}}/${SHA256}/g" Formula/kcm.rb.template > /tmp/kcm.rb.final.dry-run

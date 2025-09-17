@@ -6,10 +6,15 @@ class Kcm < Formula
   license "MIT"
 
   depends_on :macos
+  depends_on "bash"
 
   def install
+    # Install the script
     bin.install "kcm"
     chmod 0755, bin/"kcm"
+
+    # Update shebang to use brew's bash
+    inreplace bin/"kcm", "#!/usr/bin/env bash", "#!#{Formula["bash"].opt_bin}/bash"
   end
 
   test do
@@ -19,6 +24,13 @@ class Kcm < Formula
     # Test that the script exists and is executable
     assert_predicate bin/"kcm", :exist?
     assert_predicate bin/"kcm", :executable?
+
+    # Test version command
+    assert_match(/kcm version \d+\.\d+\.\d+/, shell_output("#{bin}/kcm version"))
+
+    # Test that the script can run without errors
+    # Avoid keychain operations that might trigger GUI prompts in CI
+    system "#{bin}/kcm", "help"
   end
 
   def caveats
