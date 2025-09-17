@@ -38,10 +38,10 @@ echo ""
 # Detect sed type for portability (BSD vs GNU)
 if sed --version >/dev/null 2>&1; then
     # GNU sed
-    SED_INPLACE="sed -i"
+    SED_INPLACE=(sed -i)
 else
     # BSD sed (macOS)
-    SED_INPLACE="sed -i ''"
+    SED_INPLACE=(sed -i '')
 fi
 
 # Update version in kcm script
@@ -49,8 +49,8 @@ echo "Updating version in kcm script..."
 if [ "$DRY_RUN" = true ]; then
     echo "  Would update VERSION and header comment to ${VERSION}"
 else
-    $SED_INPLACE "s/^VERSION=\".*\"/VERSION=\"${VERSION}\"/" kcm
-    $SED_INPLACE "s/^# Version: .*/# Version: ${VERSION}/" kcm
+    "${SED_INPLACE[@]}" "s/^VERSION=\".*\"/VERSION=\"${VERSION}\"/" kcm
+    "${SED_INPLACE[@]}" "s/^# Version: .*/# Version: ${VERSION}/" kcm
 fi
 
 # Generate formula from template with version (SHA256 will be updated later)
