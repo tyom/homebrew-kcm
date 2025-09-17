@@ -32,6 +32,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+GREY='\033[90m'
 NC='\033[0m' # No Color
 
 # Array to track temp files for cleanup
@@ -195,6 +196,7 @@ add_secret() {
   if [ $# -eq 1 ]; then
     # Interactive mode - prompt for value
     info "Enter secret value for $KEY_NAME (input will be hidden):"
+    echo -e "${GREY}For long secrets (>1000 chars), use: ${GREEN}pbpaste | $SCRIPT_NAME add $KEY_NAME -${NC}" >&2
     read -rs SECRET_VALUE
     echo "" >&2  # New line after hidden input
 
