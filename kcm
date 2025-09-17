@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kcm: Keychain Master - Secret management utility for macOS Keychain
-# Version: 0.2.0
+# Version: 0.3.0
 #
 # Usage:
 #   kcm add KEY_NAME             - Add secret to Keychain
@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
