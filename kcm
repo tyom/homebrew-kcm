@@ -3,7 +3,7 @@
 # Version: 0.2.0
 #
 # Usage:
-#   kcm add KEY_NAME [value]     - Add secret to Keychain
+#   kcm add KEY_NAME             - Add secret to Keychain
 #   kcm remove KEY_NAME          - Remove secret from Keychain
 #   kcm show KEY_NAME            - Display secret value
 #   kcm copy KEY_NAME            - Copy secret to clipboard (auto-clears after 45s)
@@ -12,7 +12,6 @@
 #   kcm help                     - Show this help message
 #
 # Examples:
-#   kcm add DATABASE_URL "postgresql://user:pass@host/db"
 #   kcm add API_KEY              # Interactive mode
 #   echo "secret" | kcm add TOKEN -  # From stdin
 #   kcm remove OLD_KEY
@@ -35,21 +34,15 @@ BLUE='\033[0;34m'
 GREY='\033[90m'
 NC='\033[0m' # No Color
 
-# Array to track temp files for cleanup
-declare -a TEMP_FILES=()
 # Array to track clipboard clear PIDs
 declare -a CLIPBOARD_CLEAR_PIDS=()
+# Arrays holding processed env assignments (stay in memory)
+declare -a PROCESSED_ENV_NAMES=()
+declare -a PROCESSED_ENV_VALUES=()
 
 # Global cleanup function
 cleanup() {
   local exit_code=$?
-
-  # Clean up only the temp files we created
-  if [ ${#TEMP_FILES[@]} -gt 0 ]; then
-    for temp_file in "${TEMP_FILES[@]}"; do
-      [ -f "$temp_file" ] && rm -f "$temp_file" 2>/dev/null
-    done
-  fi
 
   exit $exit_code
 }
@@ -60,13 +53,6 @@ cleanup_on_signal() {
   if [ ${#CLIPBOARD_CLEAR_PIDS[@]} -gt 0 ]; then
     for pid in "${CLIPBOARD_CLEAR_PIDS[@]}"; do
       kill "$pid" 2>/dev/null || true
-    done
-  fi
-
-  # Clean up temp files
-  if [ ${#TEMP_FILES[@]} -gt 0 ]; then
-    for temp_file in "${TEMP_FILES[@]}"; do
-      [ -f "$temp_file" ] && rm -f "$temp_file" 2>/dev/null
     done
   fi
 
@@ -99,16 +85,14 @@ USAGE:
   $SCRIPT_NAME <command> [options]
 
 COMMANDS:
-  add KEY_NAME [value]
+  add KEY_NAME
     Add a secret to Keychain and output the .env entry
 
     Options:
-      KEY_NAME "value"  - Add secret with specified value
       KEY_NAME          - Interactive mode (prompts for value)
       KEY_NAME -        - Read value from stdin
 
     Examples:
-      kcm add DATABASE_URL "postgresql://user:pass@host/db"
       kcm add API_KEY      # Prompts for value
       echo "secret" | kcm add TOKEN -
       cat ~/secret.txt | kcm add AWS_KEY -
@@ -140,8 +124,8 @@ COMMANDS:
 
     Examples:
       kcm ls               # List all accessible secrets
-      kcm ls DATABASE*     # List secrets starting with DATABASE
-      kcm ls *_KEY         # List secrets ending with _KEY
+      kcm ls 'DATABASE*'   # List secrets starting with DATABASE
+      kcm ls '*_KEY'       # List secrets ending with _KEY
 
   use [options] -- command [args...]
     Run a command with secrets from .env file resolved
@@ -175,10 +159,9 @@ add_secret() {
   if [ $# -lt 1 ]; then
     echo -e "${RED}Error: KEY_NAME is required${NC}" >&2
     echo "" >&2
-    echo "Usage: $SCRIPT_NAME add KEY_NAME [value]" >&2
+    echo "Usage: $SCRIPT_NAME add KEY_NAME" >&2
     echo "" >&2
     echo "Examples:" >&2
-    echo "  $SCRIPT_NAME add DATABASE_URL \"postgresql://...\"" >&2
     echo "  $SCRIPT_NAME add API_KEY                    # Interactive" >&2
     echo "  echo \"secret\" | $SCRIPT_NAME add TOKEN -   # From stdin" >&2
     exit 1
@@ -211,8 +194,7 @@ add_secret() {
       error_exit "No input received from stdin"
     fi
   else
-    # Value provided as argument
-    SECRET_VALUE="$2"
+    error_exit "Inline values are not supported. Use interactive input or pipe via '-'"
   fi
 
   # Check if entry already exists
@@ -256,26 +238,22 @@ get_keychain_value() {
 # This function safely parses .env files without using source/eval to prevent command injection
 process_env_file() {
   local env_file="$1"
-  local temp_file
-  temp_file=$(mktemp -t kcm.XXXXXX)
 
-  # Track temp file for global cleanup
-  TEMP_FILES+=("$temp_file")
+  # Reset processed environment arrays for this invocation
+  PROCESSED_ENV_NAMES=()
+  PROCESSED_ENV_VALUES=()
 
   if [ ! -f "$env_file" ]; then
-    echo "$temp_file"
     return 0
   fi
 
   while IFS= read -r line || [ -n "$line" ]; do
-    # Skip empty lines but preserve comments
+    # Skip comments and empty lines
     case "$line" in
       '#'*)
-        echo "$line" >> "$temp_file"
         continue
         ;;
       '')
-        echo "$line" >> "$temp_file"
         continue
         ;;
     esac
@@ -287,7 +265,7 @@ process_env_file() {
 
       # Validate variable name (must be valid shell identifier)
       if ! echo "$var_name" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$'; then
-        continue  # Skip invalid variable names
+        continue
       fi
 
       # Remove quotes if present (safely)
@@ -309,25 +287,24 @@ process_env_file() {
         fi
       fi
 
-      # Check for dangerous characters that could lead to command injection
+      # Skip values with characters that could lead to command injection
       if echo "$var_value" | grep -qE '[$`\\;|]|\$\('; then
         info "Warning: Variable '$var_name' contains potentially dangerous characters, skipping" >&2
         continue
       fi
 
-      # Write the processed variable assignment safely with proper quoting
-      # Check for special characters that need quoting
-      if echo "$var_value" | grep -qE '[[:space:]&|()<>;"'"'"'\n]'; then
-        # Escape any existing double quotes and backslashes in the value
-        var_value=$(printf '%s' "$var_value" | sed 's/\\/\\\\/g; s/"/\\"/g')
-        printf '%s="%s"\n' "$var_name" "$var_value" >> "$temp_file"
-      else
-        printf '%s=%s\n' "$var_name" "$var_value" >> "$temp_file"
-      fi
+      # Skip values containing newlines to avoid malformed exports
+      case "$var_value" in
+        *$'\n'*)
+          info "Warning: Variable '$var_name' contains newline characters, skipping" >&2
+          continue
+          ;;
+      esac
+
+      PROCESSED_ENV_NAMES+=("$var_name")
+      PROCESSED_ENV_VALUES+=("$var_value")
     fi
   done < "$env_file"
-
-  echo "$temp_file"
 }
 
 # Function to use secrets from env file
@@ -374,49 +351,18 @@ use_secrets() {
 
   # Process the env file
   if [ -f "$env_file" ]; then
-    local processed_env
-    processed_env=$(process_env_file "$env_file")
+    process_env_file "$env_file"
 
-    # Export the processed environment variables safely
-    if [ -f "$processed_env" ]; then
-      # Read and export variables safely without sourcing
-      while IFS= read -r line || [ -n "$line" ]; do
-        # Skip comments and empty lines
-        case "$line" in
-          '#'*|'')
-            continue
-            ;;
-        esac
-
-        # Check if line contains an assignment
-        if echo "$line" | grep -q '='; then
-          var_name="${line%%=*}"
-          var_value="${line#*=}"
-
-          # Remove surrounding quotes if present
-          if [[ "$var_value" =~ ^\"(.*)\"$ ]]; then
-            var_value="${BASH_REMATCH[1]}"
-            # Unescape any escaped quotes and backslashes
-            var_value="${var_value//\\\"/\"}"
-            var_value="${var_value//\\\\/\\}"
-          fi
-
-          # Export the variable
-          export "$var_name=$var_value"
-        fi
-      done < "$processed_env"
-      rm -f "$processed_env"
+    if [ ${#PROCESSED_ENV_NAMES[@]} -gt 0 ]; then
+      local idx
+      for idx in "${!PROCESSED_ENV_NAMES[@]}"; do
+        local var_name="${PROCESSED_ENV_NAMES[$idx]}"
+        local var_value="${PROCESSED_ENV_VALUES[$idx]}"
+        export "$var_name=$var_value"
+      done
     fi
   else
     info "Warning: env file '$env_file' not found, proceeding without it"
-  fi
-
-  # Clean up temp files before exec (since exec replaces the shell and trap won't fire)
-  # Don't call full cleanup() as it would exit
-  if [ ${#TEMP_FILES[@]} -gt 0 ]; then
-    for temp_file in "${TEMP_FILES[@]}"; do
-      [ -f "$temp_file" ] && rm -f "$temp_file" 2>/dev/null
-    done
   fi
 
   # Execute the command with the processed environment
@@ -521,12 +467,11 @@ list_secrets() {
 
   local pattern="${1:-*}"
 
-  # Convert simple wildcards to grep pattern
+  # Convert simple wildcards to regex pattern
   local grep_pattern
   if [ "$pattern" = "*" ]; then
     grep_pattern=".*"
   else
-    # Convert shell pattern to regex
     grep_pattern=$(echo "$pattern" | sed 's/\*/.*/g' | sed 's/\?/./g')
     grep_pattern="^${grep_pattern}$"
   fi
@@ -534,73 +479,61 @@ list_secrets() {
   echo -e "${BLUE}Accessible secrets in Keychain matching '$pattern':${NC}"
   echo ""
 
-  # List secrets using security find-generic-password
-  # We'll try common secret names and patterns
-  local secrets=""
-  local temp_list
-  temp_list=$(mktemp -t kcm.XXXXXX)
+  local -a candidates=()
+  local keychains=""
+  if ! keychains=$(security list-keychains 2>/dev/null | tr -d '"' | sed '/^$/d'); then
+    keychains=""
+  fi
 
-  # Track temp file for global cleanup
-  TEMP_FILES+=("$temp_list")
-
-  # Get all keychains and iterate through them
-  local keychains
-  keychains=$(security list-keychains | tr -d '"' | grep -v "^$")
-
-  # Search through all available keychains
-  # List all generic password entries (these are what kcm can access)
   while IFS= read -r keychain; do
     [ -n "$keychain" ] || continue
-    # Trim any leading/trailing whitespace from keychain path
     keychain=$(echo "$keychain" | xargs)
 
-    # Use security dump-keychain to find all generic password entries
-    # Filter for class: "genp" which are the generic passwords kcm can work with
-    security dump-keychain "$keychain" 2>/dev/null | \
-      awk '/^keychain:/ {keychain=1}
-           /class: "genp"/ {if(keychain) genp=1; else genp=0}
-           /0x00000007.*<blob>="[^"]+"/ {
-             if(genp) {
-               gsub(/.*<blob>="/, "");
-               gsub(/".*/, "");
-               service=$0
-             }
-           }
-           /"acct"<blob>=/ {
-             if(genp && service) {
-               print service
-               service=""
-             }
-           }
-           /^keychain:/ {genp=0; service=""}' | \
-      grep -E "$grep_pattern" >> "$temp_list" || true
+    while IFS= read -r service; do
+      [ -n "$service" ] || continue
+      candidates+=("$service")
+    done < <(
+      security dump-keychain "$keychain" 2>/dev/null | awk -v regex="$grep_pattern" '
+        BEGIN { genp=0; service="" }
+        /^keychain:/ { genp=0; service=""; next }
+        /class: "genp"/ { genp=1; next }
+        /class:/ { genp=0; service=""; next }
+        /0x00000007.*<blob>="[^"]+"/ {
+          if (genp) {
+            service=$0
+            sub(/.*<blob>="/, "", service)
+            sub(/".*/, "", service)
+          }
+          next
+        }
+        /"acct"<blob>=/ {
+          if (genp && service) {
+            if (service ~ regex) {
+              print service
+            }
+            service=""
+          }
+          next
+        }
+      ' || true
+    )
   done <<< "$keychains"
 
-  # Sort and deduplicate results, then filter for actually accessible ones
-  if [ -s "$temp_list" ]; then
-    # Test each potential secret to see if it's actually accessible
-    local accessible_list
-    accessible_list=$(mktemp -t kcm.XXXXXX)
-    TEMP_FILES+=("$accessible_list")
-
-    sort -u "$temp_list" | while IFS= read -r secret; do
-      # Try to access the secret - if successful, add to accessible list
+  local -a accessible=()
+  if [ ${#candidates[@]} -gt 0 ]; then
+    while IFS= read -r secret; do
+      [ -n "$secret" ] || continue
       if security find-generic-password -s "$secret" >/dev/null 2>&1; then
-        echo "$secret" >> "$accessible_list"
+        accessible+=("$secret")
       fi
-    done
-
-    if [ -s "$accessible_list" ]; then
-      secrets=$(cat "$accessible_list")
-    fi
-    rm -f "$accessible_list"
+    done < <(printf '%s\n' "${candidates[@]}" | LC_ALL=C sort -u)
   fi
-  rm -f "$temp_list"
 
-  if [ -z "$secrets" ]; then
+  if [ ${#accessible[@]} -eq 0 ]; then
     echo "  No secrets found matching pattern '$pattern'"
   else
-    echo "$secrets" | while IFS= read -r secret; do
+    local secret
+    for secret in "${accessible[@]}"; do
       echo "  • $secret"
     done
     echo ""

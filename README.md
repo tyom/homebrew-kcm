@@ -46,9 +46,6 @@ Add a secret to the Keychain and get the `.env` entry:
 # Interactive mode (prompts for value)
 kcm add DATABASE_URL
 
-# Direct value
-kcm add API_KEY "sk-abc123def456"
-
 # From stdin
 echo "secret-value" | kcm add TOKEN -
 cat ~/secret-file.txt | kcm add AWS_SECRET -
@@ -129,7 +126,7 @@ When you run `kcm use -- <command>`, all `keychain://` references are automatica
 
 ```bash
 # Add your database credentials
-kcm add DATABASE_URL "postgresql://user:pass@localhost/mydb"
+kcm add DATABASE_URL
 
 # Add your API keys
 kcm add STRIPE_KEY
