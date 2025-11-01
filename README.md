@@ -1,5 +1,7 @@
 # KCM - Keychain Master
 
+[![Tests](https://github.com/tyom/homebrew-kcm/actions/workflows/test.yml/badge.svg)](https://github.com/tyom/homebrew-kcm/actions/workflows/test.yml)
+
 A secure command-line utility for managing secrets in macOS Keychain with seamless `.env` file integration.
 
 ## Features
