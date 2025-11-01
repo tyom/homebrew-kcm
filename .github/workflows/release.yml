@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Make test script executable
+        run: chmod +x test_kcm.sh
+
+      - name: Run tests
+        run: ./test_kcm.sh
+
+  release:
+    needs: test
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Make release script executable
+        run: chmod +x release.sh
+
+      - name: Run release script
+        run: ./release.sh ${{ steps.version.outputs.version }}
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.version.outputs.version }}
+          body: |
+            ## kcm ${{ steps.version.outputs.version }}
+
+            ### Installation
+            ```bash
+            curl -o kcm https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/kcm
+            chmod +x kcm
+            sudo mv kcm /usr/local/bin/
+            ```
+
+            Or via Homebrew:
+            ```bash
+            brew tap tyom/kcm
+            brew install kcm
+            ```
+          files: kcm
+          draft: false
+          prerelease: false
