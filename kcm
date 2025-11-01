@@ -2,23 +2,7 @@
 # kcm: Keychain Master - Secret management utility for macOS Keychain
 # Version: 0.3.0
 #
-# Usage:
-#   kcm add KEY_NAME             - Add secret to Keychain
-#   kcm remove KEY_NAME          - Remove secret from Keychain
-#   kcm show KEY_NAME            - Display secret value
-#   kcm copy KEY_NAME            - Copy secret to clipboard (auto-clears after 45s)
-#   kcm ls [pattern]             - List secrets matching pattern
-#   kcm use [options] -- command - Run command with secrets from .env
-#   kcm help                     - Show this help message
-#
-# Examples:
-#   kcm add API_KEY              # Interactive mode
-#   echo "secret" | kcm add TOKEN -  # From stdin
-#   kcm remove OLD_KEY
-#   kcm show DATABASE_URL
-#   kcm copy API_KEY
-#   kcm ls "DATABASE*"           # List all DATABASE secrets
-#   kcm use --env-file .env -- npm run dev
+# Run 'kcm help' for usage information
 
 set -euo pipefail
 
