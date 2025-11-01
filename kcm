@@ -24,7 +24,6 @@ set -euo pipefail
 
 VERSION="0.3.0"
 SCRIPT_NAME="$(basename "$0")"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Colors for output
 RED='\033[0;31m'
@@ -49,6 +48,9 @@ cleanup() {
 
 # Cleanup function for abnormal termination (INT/TERM signals)
 cleanup_on_signal() {
+  # Clear clipboard immediately to prevent secret leakage
+  echo -n "" | pbcopy 2>/dev/null || true
+
   # Kill all clipboard clear jobs
   if [ ${#CLIPBOARD_CLEAR_PIDS[@]} -gt 0 ]; then
     for pid in "${CLIPBOARD_CLEAR_PIDS[@]}"; do
@@ -132,11 +134,14 @@ COMMANDS:
 
     Options:
       --env-file FILE   - Specify the .env file to use (default: .env)
+      --allow-unsafe    - Allow special characters in env values that are normally blocked
+                          for security (use with caution, only with trusted sources)
 
     Examples:
       kcm use --env-file .env -- npm run dev
       kcm use --env-file ../.env -- make run-server
       kcm use --env-file .env -- echo \$DATABASE_URL
+      kcm use --allow-unsafe --env-file secrets.env -- docker run myapp
 
   help
     Show this help message
@@ -171,7 +176,7 @@ add_secret() {
   local SECRET_VALUE=""
 
   # Validate key name (alphanumeric and underscore only)
-  if ! echo "$KEY_NAME" | grep -qE '^[A-Za-z][A-Za-z0-9_]*$'; then
+  if ! [[ "$KEY_NAME" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]]; then
     error_exit "Key name must start with a letter and contain only letters, numbers, and underscores"
   fi
 
@@ -198,7 +203,7 @@ add_secret() {
   fi
 
   # Check if entry already exists
-  if security find-generic-password -s "$KEY_NAME" >/dev/null 2>&1; then
+  if keychain_entry_exists "$KEY_NAME"; then
     info "Keychain entry '$KEY_NAME' already exists. Updating..."
     # Delete existing entry (suppress all output)
     security delete-generic-password -s "$KEY_NAME" >/dev/null 2>&1
@@ -233,11 +238,31 @@ get_keychain_value() {
   fi
 }
 
+# Check if a keychain entry exists
+keychain_entry_exists() {
+  local key_name="$1"
+  security find-generic-password -s "$key_name" >/dev/null 2>&1
+}
+
+# Remove outer quotes from a string (double or single)
+remove_outer_quotes() {
+  local value="$1"
+  if [[ "$value" =~ ^\".*\"$ ]]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  elif [[ "$value" =~ ^\'.*\'$ ]]; then
+    value="${value#\'}"
+    value="${value%\'}"
+  fi
+  echo "$value"
+}
+
 
 # Process environment file and replace keychain:// references
 # This function safely parses .env files without using source/eval to prevent command injection
 process_env_file() {
   local env_file="$1"
+  local allow_unsafe="${2:-false}"
 
   # Reset processed environment arrays for this invocation
   PROCESSED_ENV_NAMES=()
@@ -259,26 +284,20 @@ process_env_file() {
     esac
 
     # Check if line contains an assignment
-    if echo "$line" | grep -q '='; then
+    if [[ "$line" == *"="* ]]; then
       local var_name="${line%%=*}"
       local var_value="${line#*=}"
 
       # Validate variable name (must be valid shell identifier)
-      if ! echo "$var_name" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$'; then
+      if ! [[ "$var_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
         continue
       fi
 
       # Remove quotes if present (safely)
-      if [[ "$var_value" =~ ^\".*\"$ ]]; then
-        var_value="${var_value#\"}"
-        var_value="${var_value%\"}"
-      elif [[ "$var_value" =~ ^\'.*\'$ ]]; then
-        var_value="${var_value#\'}"
-        var_value="${var_value%\'}"
-      fi
+      var_value=$(remove_outer_quotes "$var_value")
 
       # Check for keychain:// prefix
-      if echo "$var_value" | grep -q '^keychain://'; then
+      if [[ "$var_value" == keychain://* ]]; then
         local label="${var_value#keychain://}"
         local resolved_value
         resolved_value=$(get_keychain_value "$label")
@@ -287,10 +306,15 @@ process_env_file() {
         fi
       fi
 
-      # Skip values with characters that could lead to command injection
-      if echo "$var_value" | grep -qE '[$`\\;|]|\$\('; then
-        info "Warning: Variable '$var_name' contains potentially dangerous characters, skipping" >&2
-        continue
+      # Check for potentially dangerous characters unless --allow-unsafe is used
+      if [ "$allow_unsafe" = "false" ]; then
+        # Block command substitution and other dangerous patterns
+        # Using grep for complex pattern matching (more reliable for special chars)
+        if [[ "$var_value" =~ [\$\`\\\;\|\&] ]] || [[ "$var_value" =~ \$\( ]]; then
+          info "Warning: Variable '$var_name' contains potentially dangerous characters, skipping" >&2
+          info "         Use --allow-unsafe flag if you trust the source and need these characters" >&2
+          continue
+        fi
       fi
 
       # Skip values containing newlines to avoid malformed exports
@@ -310,6 +334,7 @@ process_env_file() {
 # Function to use secrets from env file
 use_secrets() {
   local env_file=""
+  local allow_unsafe=false
   local args=()
 
   # Parse arguments
@@ -321,6 +346,10 @@ use_secrets() {
         fi
         env_file="$2"
         shift 2
+        ;;
+      --allow-unsafe)
+        allow_unsafe=true
+        shift
         ;;
       --)
         shift
@@ -344,6 +373,21 @@ use_secrets() {
     env_file=".env"
   fi
 
+  # Basic security validation for env-file path
+  # Only block access to known sensitive system directories
+  if [[ "$env_file" =~ ^/etc/passwd ]] || [[ "$env_file" =~ ^/etc/shadow ]] || \
+     [[ "$env_file" =~ ^/proc/ ]] || [[ "$env_file" =~ ^/sys/ ]] || \
+     [[ "$env_file" =~ ^/dev/ ]]; then
+    error_exit "Security error: Cannot use system files as env-file"
+  fi
+
+  # Optional verbose warning for paths outside current directory (can be disabled)
+  if [ "${KCM_VERBOSE:-}" = "1" ]; then
+    if [[ "$env_file" =~ ^\.\. ]] || [[ "$env_file" =~ ^/ ]]; then
+      info "Note: Using env-file outside current directory: $env_file" >&2
+    fi
+  fi
+
   # Check if there's a command to run
   if [ ${#args[@]} -eq 0 ]; then
     error_exit "No command specified. Use: $SCRIPT_NAME use --env-file .env -- command [args...]"
@@ -351,7 +395,7 @@ use_secrets() {
 
   # Process the env file
   if [ -f "$env_file" ]; then
-    process_env_file "$env_file"
+    process_env_file "$env_file" "$allow_unsafe"
 
     if [ ${#PROCESSED_ENV_NAMES[@]} -gt 0 ]; then
       local idx
@@ -382,7 +426,7 @@ remove_secret() {
   local KEY_NAME="$1"
 
   # Check if entry exists
-  if security find-generic-password -s "$KEY_NAME" >/dev/null 2>&1; then
+  if keychain_entry_exists "$KEY_NAME"; then
     # Delete the entry
     if security delete-generic-password -s "$KEY_NAME" >/dev/null 2>&1; then
       success "Secret '$KEY_NAME' removed from Keychain"
@@ -408,9 +452,7 @@ show_secret() {
   local value
 
   # Get the secret value
-  value=$(security find-generic-password -s "$KEY_NAME" -w 2>/dev/null)
-
-  if [ $? -eq 0 ] && [ -n "$value" ]; then
+  if value=$(security find-generic-password -s "$KEY_NAME" -w 2>/dev/null) && [ -n "$value" ]; then
     echo "$value"
   else
     error_exit "Secret '$KEY_NAME' not found in Keychain"
@@ -435,9 +477,7 @@ copy_secret() {
   local value
 
   # Get the secret value
-  value=$(security find-generic-password -s "$KEY_NAME" -w 2>/dev/null)
-
-  if [ $? -eq 0 ] && [ -n "$value" ]; then
+  if value=$(security find-generic-password -s "$KEY_NAME" -w 2>/dev/null) && [ -n "$value" ]; then
     echo -n "$value" | pbcopy
     success "Secret '$KEY_NAME' copied to clipboard"
     info "Clipboard will be cleared in 45 seconds for security"
@@ -523,7 +563,7 @@ list_secrets() {
   if [ ${#candidates[@]} -gt 0 ]; then
     while IFS= read -r secret; do
       [ -n "$secret" ] || continue
-      if security find-generic-password -s "$secret" >/dev/null 2>&1; then
+      if keychain_entry_exists "$secret"; then
         accessible+=("$secret")
       fi
     done < <(printf '%s\n' "${candidates[@]}" | LC_ALL=C sort -u)

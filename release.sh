@@ -104,10 +104,12 @@ else
 
     echo "  Downloading tarball from: $TARBALL_URL"
 
-    # Download and calculate SHA256
-    curl -sL "$TARBALL_URL" -o /tmp/kcm-release.tar.gz
-    SHA256=$(shasum -a 256 /tmp/kcm-release.tar.gz | awk '{print $1}')
-    rm /tmp/kcm-release.tar.gz
+    # Download and calculate SHA256 (use secure temp file)
+    TEMP_FILE=$(mktemp)
+    trap "rm -f '$TEMP_FILE'" EXIT
+    curl -sL "$TARBALL_URL" -o "$TEMP_FILE"
+    SHA256=$(shasum -a 256 "$TEMP_FILE" | awk '{print $1}')
+    rm -f "$TEMP_FILE"
 fi
 
 echo "  SHA256: $SHA256"
@@ -116,7 +118,9 @@ echo "  SHA256: $SHA256"
 echo "Updating Formula/kcm.rb with SHA256..."
 if [ "$DRY_RUN" = true ]; then
     echo "  Would update Formula/kcm.rb with SHA256: $SHA256"
-    sed -e "s/{{VERSION}}/${VERSION}/g" -e "s/{{SHA256}}/${SHA256}/g" Formula/kcm.rb.template > /tmp/kcm.rb.final.dry-run
+    TEMP_FORMULA=$(mktemp)
+    trap "rm -f '$TEMP_FORMULA'" EXIT
+    sed -e "s/{{VERSION}}/${VERSION}/g" -e "s/{{SHA256}}/${SHA256}/g" Formula/kcm.rb.template > "$TEMP_FORMULA"
 else
     sed -e "s/{{VERSION}}/${VERSION}/g" -e "s/{{SHA256}}/${SHA256}/g" Formula/kcm.rb.template > Formula/kcm.rb
 fi
