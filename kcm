@@ -256,8 +256,56 @@ process_env_file() {
     return 0
   fi
 
+  local var_name=""
+  local var_value=""
+  local in_multiline=false
+  local quote_char=""
+
   while IFS= read -r line || [ -n "$line" ]; do
-    # Skip comments and empty lines
+    # If we're in a multiline value, append to existing value
+    if [ "$in_multiline" = true ]; then
+      # Check if this line closes the multiline value
+      if [[ "$line" == *"$quote_char" ]]; then
+        # Append everything before the closing quote
+        local before_quote="${line%$quote_char*}"
+        if [ -n "$before_quote" ]; then
+          var_value+=$'\n'"$before_quote"
+        fi
+        in_multiline=false
+
+        # Check for keychain:// prefix
+        if [[ "$var_value" == keychain://* ]]; then
+          local label="${var_value#keychain://}"
+          local resolved_value
+          resolved_value=$(get_keychain_value "$label")
+          if [ -n "$resolved_value" ]; then
+            var_value="$resolved_value"
+          fi
+        fi
+
+        # Check for potentially dangerous characters unless --allow-unsafe is used
+        if [ "$allow_unsafe" = "false" ]; then
+          if [[ "$var_value" =~ [\$\`\\\;\|\&] ]] || [[ "$var_value" =~ \$\( ]]; then
+            info "Warning: Variable '$var_name' contains potentially dangerous characters, skipping" >&2
+            info "         Use --allow-unsafe flag if you trust the source and need these characters" >&2
+            var_name=""
+            var_value=""
+            continue
+          fi
+        fi
+
+        PROCESSED_ENV_NAMES+=("$var_name")
+        PROCESSED_ENV_VALUES+=("$var_value")
+        var_name=""
+        var_value=""
+      else
+        # Continue accumulating multiline value
+        var_value+=$'\n'"$line"
+      fi
+      continue
+    fi
+
+    # Skip comments and empty lines (only when not in multiline)
     case "$line" in
       '#'*)
         continue
@@ -269,15 +317,36 @@ process_env_file() {
 
     # Check if line contains an assignment
     if [[ "$line" == *"="* ]]; then
-      local var_name="${line%%=*}"
-      local var_value="${line#*=}"
+      var_name="${line%%=*}"
+      var_value="${line#*=}"
 
       # Validate variable name (must be valid shell identifier)
       if ! [[ "$var_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
         continue
       fi
 
-      # Remove quotes if present (safely)
+      # Check if value starts with a quote but doesn't end with matching quote (multiline)
+      if [[ "$var_value" =~ ^\"(.*)\"$ ]]; then
+        # Complete double-quoted value on one line - handle normally below
+        :
+      elif [[ "$var_value" =~ ^\" ]]; then
+        # Double-quoted multiline value (starts with " but doesn't end with ")
+        quote_char='"'
+        var_value="${var_value#\"}"
+        in_multiline=true
+        continue
+      elif [[ "$var_value" =~ ^\'(.*)\'$ ]]; then
+        # Complete single-quoted value on one line - handle normally below
+        :
+      elif [[ "$var_value" =~ ^\' ]]; then
+        # Single-quoted multiline value (starts with ' but doesn't end with ')
+        quote_char="'"
+        var_value="${var_value#\'}"
+        in_multiline=true
+        continue
+      fi
+
+      # Remove quotes if present (safely) for single-line values
       var_value=$(remove_outer_quotes "$var_value")
 
       # Check for keychain:// prefix
@@ -300,14 +369,6 @@ process_env_file() {
           continue
         fi
       fi
-
-      # Skip values containing newlines to avoid malformed exports
-      case "$var_value" in
-        *$'\n'*)
-          info "Warning: Variable '$var_name' contains newline characters, skipping" >&2
-          continue
-          ;;
-      esac
 
       PROCESSED_ENV_NAMES+=("$var_name")
       PROCESSED_ENV_VALUES+=("$var_value")

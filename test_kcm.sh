@@ -201,6 +201,48 @@ assert_equals "quoted value" "$output" "Double quoted value handled"
 output=$("$SCRIPT_PATH" use --env-file "$TEST_ENV" -- bash -c 'echo "$SINGLE_QUOTED"' 2>&1) && exit_code=$? || exit_code=$?
 assert_equals "single quoted" "$output" "Single quoted value handled"
 
+# Test 14a: Multiline values
+cat > "$TEST_ENV" << 'EOF'
+MULTILINE_DOUBLE="line 1
+line 2
+line 3"
+MULTILINE_SINGLE='single line 1
+single line 2'
+AFTER_MULTI=after_value
+EOF
+
+output=$("$SCRIPT_PATH" use --env-file "$TEST_ENV" -- bash -c 'printf "%s" "$MULTILINE_DOUBLE"' 2>&1) && exit_code=$? || exit_code=$?
+expected=$'line 1\nline 2\nline 3'
+assert_equals "$expected" "$output" "Double-quoted multiline value handled"
+
+output=$("$SCRIPT_PATH" use --env-file "$TEST_ENV" -- bash -c 'printf "%s" "$MULTILINE_SINGLE"' 2>&1) && exit_code=$? || exit_code=$?
+expected=$'single line 1\nsingle line 2'
+assert_equals "$expected" "$output" "Single-quoted multiline value handled"
+
+output=$("$SCRIPT_PATH" use --env-file "$TEST_ENV" -- bash -c 'echo "$AFTER_MULTI"' 2>&1) && exit_code=$? || exit_code=$?
+assert_equals "after_value" "$output" "Variable after multiline parsed correctly"
+
+# Recreate test env for remaining tests
+cat > "$TEST_ENV" << EOF
+SIMPLE_VAR=simple_value
+DOUBLE_QUOTED="quoted value"
+SINGLE_QUOTED='single quoted'
+# This is a comment
+EMPTY_VAR=
+  # Indented comment
+SPACES_AROUND = value with spaces
+EXPORT_VAR=exported
+export EXPORTED_VAR=exported_value
+EOF
+
+# Add a secret for keychain:// resolution
+echo "keychain_secret" | "$SCRIPT_PATH" add "${TEST_KEY}_QUOTE" - >/dev/null 2>&1
+
+# Add keychain reference back
+cat >> "$TEST_ENV" << EOF
+KEYCHAIN_VAR=keychain://${TEST_KEY}_QUOTE
+EOF
+
 # Test 15: Keychain resolution
 output=$("$SCRIPT_PATH" use --env-file "$TEST_ENV" -- bash -c 'echo "$KEYCHAIN_VAR"' 2>&1) && exit_code=$? || exit_code=$?
 assert_equals "keychain_secret" "$output" "Keychain reference resolved"
