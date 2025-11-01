@@ -112,13 +112,11 @@ NODE_ENV=development
 
 When you run `kcm use -- <command>`, all `keychain://` references are automatically resolved from the Keychain.
 
-## Security Benefits
+## Security
 
-1. **No Plain Text Secrets**: Sensitive data never stored in files
-2. **Keychain Protection**: Leverages macOS Keychain's built-in security
-3. **Access Control**: Secrets protected by your macOS user account
-4. **Audit Trail**: Keychain access can be monitored via Console
-5. **Auto-clearing Clipboard**: Copied secrets automatically removed after 45 seconds
+Secrets stored in macOS Keychain with OS-level encryption. Auto-clearing clipboard, input validation, safe parsing.
+
+**See [SECURITY.md](SECURITY.md) for full security policy, best practices, and limitations.**
 
 ## Examples
 
@@ -221,40 +219,9 @@ security delete-generic-password -s "KEY_NAME"
 
 ## Development
 
-### Release Process
+**See [RELEASE.md](RELEASE.md) for release process.**
 
-To create a new release:
-
-1. **Test with dry-run first:**
-
-   ```bash
-   ./release.sh --dry-run 0.2.0
-   ```
-
-   This shows what will happen without making any changes.
-
-2. **Create the actual release:**
-
-   ```bash
-   ./release.sh 0.2.0
-   ```
-
-   This will:
-
-   - Update version in the kcm script
-   - Generate Formula/kcm.rb from template
-   - Commit and create a git tag
-   - Push to GitHub
-   - Calculate SHA256 for the release tarball
-   - Update the formula with the correct SHA256
-   - Push the final formula
-
-3. **Users can then upgrade:**
-   ```bash
-   brew upgrade kcm
-   ```
-
-The release script handles all versioning, tagging, and formula updates automatically.
+**See [ARCHITECTURE.md](ARCHITECTURE.md) for technical design and implementation details.**
 
 ## Contributing
 
