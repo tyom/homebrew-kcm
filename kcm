@@ -117,15 +117,15 @@ COMMANDS:
     Run a command with secrets from .env file resolved
 
     Options:
-      --env-file FILE   - Specify the .env file to use (default: .env)
-      --allow-unsafe    - Allow special characters in env values that are normally blocked
-                          for security (use with caution, only with trusted sources)
+      -e, --env-file FILE   - Specify the .env file to use (default: .env)
+      -u, --allow-unsafe    - Allow special characters in env values that are normally blocked
+                              for security (use with caution, only with trusted sources)
 
     Examples:
-      kcm use --env-file .env -- npm run dev
+      kcm use -e .env -- npm run dev
       kcm use --env-file ../.env -- make run-server
-      kcm use --env-file .env -- echo \$DATABASE_URL
-      kcm use --allow-unsafe --env-file secrets.env -- docker run myapp
+      kcm use -e .env -- echo \$DATABASE_URL
+      kcm use -u -e secrets.env -- docker run myapp
 
   help
     Show this help message
@@ -324,14 +324,14 @@ use_secrets() {
   # Parse arguments
   while [ $# -gt 0 ]; do
     case "$1" in
-      --env-file)
+      -e|--env-file)
         if [ -z "$2" ]; then
-          error_exit "--env-file requires an argument"
+          error_exit "-e/--env-file requires an argument"
         fi
         env_file="$2"
         shift 2
         ;;
-      --allow-unsafe)
+      -u|--allow-unsafe)
         allow_unsafe=true
         shift
         ;;
